@@ -2,10 +2,12 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <time.h>
+#include "utils.h"
 
 #define N 20
 #define MAX 400
 #define START 20
+#define FOODLIMIT 10
 
 struct point {
 
@@ -21,13 +23,6 @@ struct lifeParameters {
 
 };
 
-struct stats {
-
-    int childs;
-    int foodEaten;
-
-};
-
 typedef struct {
 
     struct point p;
@@ -37,50 +32,70 @@ typedef struct {
 
 } individual;
 
-individual initIndividual(char map[N][N]);
-void spawnIndividuals(individual species[MAX], char map[N][N]);
-void iteration(individual species[MAX], char map[N][N], int *count);
-void move(individual *ind, char map[N][N], int *count, individual species[MAX]);
-void removeIndividual(individual species[MAX], int *count, int i);
-void spawnFood(char map[N][N]);
-int action(individual *ind, struct point p1, int *count, individual species[MAX], char map[N][N]); // 0 - dead, 1 - alive;
-int fight(int energy1, int energy2);
-int indSearch(individual *ind, int *count, individual species[MAX]);
-void bornInd(individual *ind, individual species[MAX], int *count);
+typedef enum {
 
-individual initIndividual(char map[N][N]){
+    DIE, // die
+    STAY, // stay
+    MOVE, // move
+    KILL_AND_MOVE, // kill other ind and move
+    REPRODUCE // mate and stay
+
+} ActionResult;
+
+individual initIndividual(individual species[MAX], int *count); // OK
+void spawnIndividuals(individual species[MAX], int *count); // OK
+void iteration(individual species[MAX], int *count, int *foodCount, struct point food[FOODLIMIT]);
+ActionResult move(individual *ind, int *count, int *foodCount, individual species[MAX], struct point food[FOODLIMIT], int *victimIndex);
+void removeIndividual(individual species[MAX], int *count, int i); // OK
+void removeFood(struct point food[FOODLIMIT], int *foodCount, int i); // OK
+void spawnFood(struct point food[FOODLIMIT], int *foodCount); // OK
+ActionResult action(individual *ind, struct point next, int *count, int *foodCount, individual species[MAX], struct point food[FOODLIMIT], int *victimIndex);
+int indSearch(individual *ind, int *count, individual species[MAX]); // OK
+void bornInd(individual *ind, individual species[MAX], int *count); // OK
+
+individual initIndividual(individual species[MAX], int *count){
 
     int x;
     int y;
     individual ind;
-    do {
-    x = rand() % N;
-    y = rand() % N;
-    } while (map[x][y] != '*');
+    int done = 0;
+    while (!done){
 
-    ind.lP.age = 0;
-    ind.lP.energy = 8;
-    ind.p.x = x;
-    ind.p.y = y;
-    ind.pregnancyTimer = -1;
-    ind.sex = rand() % 2;   
-    map[x][y] = (ind.sex == 0) ? '0' : '1';
+        x = rand() % N;
+        y = rand() % N;
+        int exist = 0;
+        for (int i = 0; i < *count; i++){
+            if (species[i].p.x == x && species[i].p.y == y){
+                exist = 1;
+                break;
+            }
+        }
+
+        if (!exist){
+            ind.lP.age = 0;
+            ind.lP.energy = 20;
+            ind.p.x = x;
+            ind.p.y = y;
+            ind.pregnancyTimer = -1;
+            ind.sex = rand() % 2; 
+            done = 1;
+        }
+    }
 
     return ind;
 
-
 }
 
-void spawnIndividuals(individual species[MAX], char map[N][N]){
+void spawnIndividuals(individual species[MAX], int *count){
 
     for (int i = 0; i < START; i++){
 
-        species[i] = initIndividual(map);
-
+        species[*count] = initIndividual(species, count);
+        (*count)++;
     }
 }
 
-void iteration(individual species[MAX], char map[N][N], int *count){
+void iteration(individual species[MAX], int *count, int *foodCount, struct point food[FOODLIMIT]) {
 
     int i = 0;
     while (i < *count) {
@@ -90,7 +105,7 @@ void iteration(individual species[MAX], char map[N][N], int *count){
 
         if (species[i].pregnancyTimer >= 0) {
             if (species[i].pregnancyTimer == 0){
-                bornInd(species[i], species, count, map);
+                bornInd(&species[i], species, count);
                 species[i].lP.energy--;
             }
             species[i].pregnancyTimer--;
@@ -100,20 +115,29 @@ void iteration(individual species[MAX], char map[N][N], int *count){
             removeIndividual(species, count, i);
             continue;
         }
-        move(&species[i], map, count, species);
+        int victimIndex = -1;
+        ActionResult r = move(&species[i], count, foodCount, species, food, &victimIndex);
+
+        if (r == DIE) {
+            removeIndividual(species, count, i);
+            continue;
+        }
+
+        if (r == KILL_AND_MOVE && victimIndex != -1) {
+            removeIndividual(species, count, victimIndex);
+        }
+
         i++;
 
     }
-    spawnFood(map);
+    spawnFood(food, foodCount);
 
 }
 
-void move(individual *ind, char map[N][N], int *count, individual species[MAX]){
+ActionResult move(individual *ind, int *count, int *foodCount, individual species[MAX], struct point food[FOODLIMIT], int *victimIndex){
 
     int option = rand() % 9;
-
-    map[ind->p.x][ind->p.y] = '*';
-
+    struct point next = ind->p;
 
     switch (option)
     {
@@ -122,107 +146,289 @@ void move(individual *ind, char map[N][N], int *count, individual species[MAX]){
     case 1: // up
         if (ind->p.x > 0) {
 
-            struct point next;
             next.x = ind->p.x - 1;
             next.y = ind->p.y;
 
-            if (action(ind, next, count, species, map)) {
-                ind->p.x--;
+            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
+                case MOVE: {
+                    ind->p.x--;
+                    break;
+                }
+                case STAY: {
+                    break;
+                }
+                case REPRODUCE: {
+                    // works the same as stay just for now
+                    break;
+                }
+                case DIE: {
+                    break;
+                    // removing in iteration
+                }
+                case KILL_AND_MOVE: {
+                    ind->p.x--;
+                    break;
+                    // removing in iteration
+                }
+                default:
+                    break;
+                
             }
         }
         break;
     case 2: // down
         if (ind->p.x < N - 1) {
 
-            struct point next;
             next.x = ind->p.x + 1;
             next.y = ind->p.y;
 
-            if (action(ind, next, count, species, map)) {
-                ind->p.x++;
+            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
+                case MOVE: {
+                    ind->p.x++;
+                    break;
+                }
+                case STAY: {
+                    break;
+                }
+                case REPRODUCE: {
+                    // works the same as stay just for now
+                    break;
+                }
+                case DIE: {
+                    break;
+                    // removing in iteration
+                }
+                case KILL_AND_MOVE: {
+                    ind->p.x++;
+                    break;
+                    // removing in iteration
+                }
+                default:
+                    break;
+                
             }
+        
         }
         break;
+
     case 3: // right
         if (ind->p.y < N - 1) {
 
-            struct point next;
             next.x = ind->p.x;
             next.y = ind->p.y + 1;
 
-            if (action(ind, next, count, species, map)) {
-                ind->p.y++;
+            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
+                case MOVE: {
+                    ind->p.y++;
+                    break;
+                }
+                case STAY: {
+                    break;
+                }
+                case REPRODUCE: {
+                    // works the same as stay just for now
+                    break;
+                }
+                case DIE: {
+                    break;
+                    // removing in iteration
+                }
+                case KILL_AND_MOVE: {
+                    ind->p.y++;
+                    break;
+                    // removing in iteration
+                }
+                default:
+                    break;
+                
             }
         }
+
         break;
     case 4: // left
         if (ind->p.y > 0) {
 
-            struct point next;
             next.x = ind->p.x;
             next.y = ind->p.y - 1;
 
-            if (action(ind, next, count, species, map)) {
-                ind->p.y--;
+            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
+                case MOVE: {
+                    ind->p.y--;
+                    break;
+                }
+                case STAY: {
+                    break;
+                }
+                case REPRODUCE: {
+                    // works the same as stay just for now
+                    break;
+                }
+                case DIE: {
+                    break;
+                    // removing in iteration
+                }
+                case KILL_AND_MOVE: {
+                    ind->p.y--;
+                    break;
+                    // removing in iteration
+                }
+                default:
+                    break;
+                
             }
+
         }
+
         break;
     case 5:
         if (ind->p.x > 0 && ind->p.y < N - 1) {
 
-            struct point next;
             next.x = ind->p.x - 1;
             next.y = ind->p.y + 1;
 
-            if (action(ind, next, count, species, map)) {
-                ind->p.x--;
-                ind->p.y++;
+            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
+                case MOVE: {
+                    ind->p.x--;
+                    ind->p.y++;
+                    break;
+                }
+                case STAY: {
+                    break;
+                }
+                case REPRODUCE: {
+                    // works the same as stay just for now
+                    break;
+                }
+                case DIE: {
+                    break;
+                    // removing in iteration
+                }
+                case KILL_AND_MOVE: {
+                    ind->p.x--;
+                    ind->p.y++;
+                    break;
+                    // removing in iteration
+                }
+                default:
+                    break;
+                
             }
+            
         }
         break;
     case 6:
         if (ind->p.x > 0 && ind->p.y > 0) {
 
-            struct point next;
             next.x = ind->p.x - 1;
             next.y = ind->p.y - 1;
-
-            if (action(ind, next, count, species, map)) {
-                ind->p.x--;
-                ind->p.y--;
+            
+            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
+                case MOVE: {
+                    ind->p.x--;
+                    ind->p.y--;
+                    break;
+                }
+                case STAY: {
+                    break;
+                }
+                case REPRODUCE: {
+                    // works the same as stay just for now
+                    break;
+                }
+                case DIE: {
+                    break;
+                    // removing in iteration
+                }
+                case KILL_AND_MOVE: {
+                    ind->p.x--;
+                    ind->p.y--;
+                    break;
+                    // removing in iteration
+                }
+                default:
+                    break;
+                
             }
         }
         break;
     case 7:
         if (ind->p.x < N - 1 && ind->p.y < N - 1) {
 
-            struct point next;
             next.x = ind->p.x + 1;
             next.y = ind->p.y + 1;
 
-            if (action(ind, next, count, species, map)) {
-                ind->p.x++;
-                ind->p.y++;
+            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
+                case MOVE: {
+                    ind->p.x++;
+                    ind->p.y++;
+                    break;
+                }
+                case STAY: {
+                    break;
+                }
+                case REPRODUCE: {
+                    // works the same as stay just for now
+                    break;
+                }
+                case DIE: {
+                    break;
+                    // removing in iteration
+                }
+                case KILL_AND_MOVE: {
+                    ind->p.x++;
+                    ind->p.y++;
+                    break;
+                    // removing in iteration
+                }
+                default:
+                    break;
+                
             }
+
         }
         break;
     case 8:
         if (ind->p.x < N - 1 && ind->p.y > 0) {
 
-            struct point next;
             next.x = ind->p.x + 1;
             next.y = ind->p.y - 1;
 
-            if (action(ind, next, count, species, map)) {
-                ind->p.x++;
-                ind->p.y--;
+            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
+                case MOVE: {
+                    ind->p.x++;
+                    ind->p.y--;
+                    break;
+                }
+                case STAY: {
+                    break;
+                }
+                case REPRODUCE: {
+                    // works the same as stay just for now
+                    break;
+                }
+                case DIE: {
+                    break;
+                    // removing in iteration
+                }
+                case KILL_AND_MOVE: {
+                    ind->p.x++;
+                    ind->p.y--;
+                    break;
+                    // removing in iteration
+                }
+                default:
+                    break;
+                
             }
+
         }
         break;
     default:
         break;
     }
-    map[ind->p.x][ind->p.y] = (ind->sex == 0) ? '0' : '1';
+
+    return STAY;
+
 }
 
 void removeIndividual(individual species[MAX], int *count, int i){
@@ -232,88 +438,100 @@ void removeIndividual(individual species[MAX], int *count, int i){
 
 }
 
-void spawnFood(char map[N][N]){
+void removeFood(struct point food[FOODLIMIT], int *foodCount, int i){
+    food[i] = food[*foodCount - 1];
+    (*foodCount)--;
+}
 
-    int successes = 0;
+void spawnFood(struct point food[FOODLIMIT], int *foodCount){ 
+
     int x;
     int y;
+    int attempts = 0;
 
-    while (successes < 2){
+    while (*foodCount < FOODLIMIT){
 
         x = rand() % N;
         y = rand() % N;
+        int exist = 0;
+        for (int i = 0; i < *foodCount; i++){
 
-        if (map[x][y] == '*'){
-            successes++;
-            map[x][y] = '$'; // Food
-        
+            if (food[i].x == x && food[i].y == y){
+                exist = 1;
+                break;
+            }
+
+        }
+        if (!(exist)) {
+            food[*foodCount].x = x;
+            food[*foodCount].y = y;
+            (*foodCount)++;
+        } else {
+            attempts++;
+            if (attempts > 200) break;
         }
     }
 }
 
-int action(individual *ind, struct point next, int *count, individual species[MAX], char map[N][N]){
+ActionResult action(individual *ind, struct point next, int *count, int *foodCount, individual species[MAX], struct point food[FOODLIMIT], int *victimIndex){
 
     // next -> new position of ind who takes an action
 
-    char cell = map[next.x][next.y];
-
-    if (cell == '*'){
-        return 1;
-    } else if (cell == '$'){
-        ind->lP.energy += 8; // eat food;
-        return 1;
-    } 
-
-    // spotting other ind
+    // finding out what stays on next ind position:
+    
+    // food option
+    for (int i = 0; i < *foodCount; i++){
+        if (food[i].x == next.x && food[i].y == next.y){
+            ind->lP.energy += 8;
+            removeFood(food, foodCount, i);
+            return MOVE;
+        }
+    }
+    // other ind option
     for (int i = 0; i < *count; i++){
-        if (species[i].p.x == next.x && species[i].p.y == next.y){
-            if (species[i].sex != ind->sex &&
-    ind->pregnancyTimer == -1 &&
-    species[i].pregnancyTimer == -1) {
 
-                // fight if 1 ind won, 0 if lost:
+        if (&species[i] == ind) continue;
+        if (species[i].p.x == next.x && species[i].p.y == next.y){
+
+            if ((ind->sex == species[i].sex) || (ind->pregnancyTimer != -1) || (species[i].pregnancyTimer != -1)){
+
                 if (fight(ind->lP.energy, species[i].lP.energy)){
-                    removeIndividual(species, count, i);
                     ind->lP.energy += 8;
+                    *victimIndex = i;
+                    return KILL_AND_MOVE;
                     
                 } else {
                     species[i].lP.energy += 8;
-                    int idx = indSearch(ind, count, species);
-                    if (idx >= 0) removeIndividual(species, count, idx);
-                    return 0;
+                    return DIE;
                 }
 
-            } else if (ind->sex == 0){
-
-                species[i].pregnancyTimer = 3;
-                ind->lP.energy--;
-                species[i].lP.energy--;
-
-            } else if (ind->sex == 1) {
-
-                ind->pregnancyTimer = 3;
-                ind->lP.energy--;
-                species[i].lP.energy--;
-
             } else {
+                if (ind->sex == 0) /*male*/{
 
-                printf("Something strange occured");
+                    species[i].pregnancyTimer = 3;
+                    ind->lP.energy--;
+                    species[i].lP.energy--;
+                    return REPRODUCE;
+                } else if (ind->sex == 1) /*female*/{
+                    
+                    ind->pregnancyTimer = 3;
+                    ind->lP.energy--;
+                    species[i].lP.energy--;
+                    return REPRODUCE;
+                } else /*smth strange*/{
+                    printf("Something strange occured");
+                    return STAY;
+                }
+            }    
 
-            }
-        }
+            
     }
-
-    return 1; // alive
+     
 }
+    // free cell
+    return MOVE; 
 
-int fight(int energy1, int energy2){
-
-    if ((energy1 + rand() % 5) > (energy2 + rand() % 5)){
-        return 1;
-    } else {
-        return 0;
-    }
-}   
+}
 
 int indSearch(individual *ind, int *count, individual species[MAX]){
 
@@ -329,14 +547,16 @@ int indSearch(individual *ind, int *count, individual species[MAX]){
 
 void bornInd(individual *ind, individual species[MAX], int *count){
     
+    if (*count >= MAX) return; // avoid overflow
+
     individual newInd;
     newInd.p.x = ind->p.x;
     newInd.p.y = ind->p.y;
     newInd.lP.age = 0;
     newInd.lP.energy = 8;
-    newInd.sex = (rand() % 2 == 1) ? '1' : '0';
+    newInd.sex = rand() % 2;
+
     species[*count] = newInd;
-    map[newInd.p.x][newInd.p.y] = (newInd.sex == 0) ? '0' : '1';
     (*count)++;
 
 }
