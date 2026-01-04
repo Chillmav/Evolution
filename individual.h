@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <time.h>
 #include "utils.h"
+#include "action.h"
 
 #define N 20
 #define MAX 400
@@ -28,9 +29,17 @@ typedef struct {
     struct point p;
     struct lifeParameters lP;
     int sex; // 0 -> male; 1 -> female;
-    int pregnancyTimer; // it last 3 iterations until new ind will born
+    int pregnancyTimer;
 
 } individual;
+
+typedef struct {
+
+    int indIndex;
+    struct point target;
+    int satisfied; // 0 -> if move wasn't done, 1 -> if yes 
+
+} intent;
 
 typedef enum {
 
@@ -95,7 +104,7 @@ void spawnIndividuals(individual species[MAX], int *count){
     }
 }
 
-void iteration(individual species[MAX], int *count, int *foodCount, struct point food[FOODLIMIT]) {
+void iteration(individual species[MAX], int *count, int *foodCount, struct point food[FOODLIMIT], int actions[MAX], intent oldIntents[MAX]) {
 
     int i = 0;
     while (i < *count) {
@@ -105,18 +114,21 @@ void iteration(individual species[MAX], int *count, int *foodCount, struct point
 
         if (species[i].pregnancyTimer >= 0) {
             if (species[i].pregnancyTimer == 0){
-                bornInd(&species[i], species, count);
+                bornInd(&species[i], species, count, actions); // have to involve actions there yet
                 species[i].lP.energy--;
             }
             species[i].pregnancyTimer--;
         }
 
         if (species[i].lP.energy <= 0 || species[i].lP.age >= 100) {
-            removeIndividual(species, count, i);
+            removeIndividual(species, count, i); // have to involve actions there yet
             continue;
         }
-        int victimIndex = -1;
-        ActionResult r = move(&species[i], count, foodCount, species, food, &victimIndex);
+
+        // RESOLVING INTENTIONS:
+
+
+        //
 
         if (r == DIE) {
             removeIndividual(species, count, i);
@@ -132,308 +144,87 @@ void iteration(individual species[MAX], int *count, int *foodCount, struct point
     }
     spawnFood(food, foodCount);
 
+    // NEW INTENTIONS:
+
+    intent newIntents[MAX];
+    while (i < *count){
+
+        intent newIntent;
+        struct point target = move(&species[i], count, foodCount, species, food);
+        newIntent.target.x = target.x;
+        newIntent.target.y = target.y;
+        newIntent.indIndex = i;
+        newIntent.satisfied = 0;
+        newIntents[i] = newIntent;
+        i++;
+
+    }
+
+    oldIntents = newIntents;
+        
+    //
+
 }
 
-ActionResult move(individual *ind, int *count, int *foodCount, individual species[MAX], struct point food[FOODLIMIT], int *victimIndex){
+struct point move(individual *ind, int *count, int *foodCount, individual species[MAX], struct point food[FOODLIMIT]){
+
+
+    // in the future there will be "choosing move" logic incorporating genes of each individual
 
     int option = rand() % 9;
     struct point next = ind->p;
+    if (option == 0) return next;
 
-    switch (option)
-    {
-    case 0: // nothing
-        break;
-    case 1: // up
-        if (ind->p.x > 0) {
+    int dx[] = {0, -1,  1,  0,  0,  -1,  -1,  1,  1, };
+    int dy[] = {0,  0,  0,  1, -1,   1,  -1,  1, -1, };
 
-            next.x = ind->p.x - 1;
-            next.y = ind->p.y;
+    next.x = ind->p.x + dx[option];
+    next.y = ind->p.y + dy[option];
 
-            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
-                case MOVE: {
-                    ind->p.x--;
-                    break;
-                }
-                case STAY: {
-                    break;
-                }
-                case REPRODUCE: {
-                    // works the same as stay just for now
-                    break;
-                }
-                case DIE: {
-                    break;
-                    // removing in iteration
-                }
-                case KILL_AND_MOVE: {
-                    ind->p.x--;
-                    break;
-                    // removing in iteration
-                }
-                default:
-                    break;
-                
-            }
-        }
-        break;
-    case 2: // down
-        if (ind->p.x < N - 1) {
-
-            next.x = ind->p.x + 1;
-            next.y = ind->p.y;
-
-            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
-                case MOVE: {
-                    ind->p.x++;
-                    break;
-                }
-                case STAY: {
-                    break;
-                }
-                case REPRODUCE: {
-                    // works the same as stay just for now
-                    break;
-                }
-                case DIE: {
-                    break;
-                    // removing in iteration
-                }
-                case KILL_AND_MOVE: {
-                    ind->p.x++;
-                    break;
-                    // removing in iteration
-                }
-                default:
-                    break;
-                
-            }
-        
-        }
-        break;
-
-    case 3: // right
-        if (ind->p.y < N - 1) {
-
-            next.x = ind->p.x;
-            next.y = ind->p.y + 1;
-
-            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
-                case MOVE: {
-                    ind->p.y++;
-                    break;
-                }
-                case STAY: {
-                    break;
-                }
-                case REPRODUCE: {
-                    // works the same as stay just for now
-                    break;
-                }
-                case DIE: {
-                    break;
-                    // removing in iteration
-                }
-                case KILL_AND_MOVE: {
-                    ind->p.y++;
-                    break;
-                    // removing in iteration
-                }
-                default:
-                    break;
-                
-            }
-        }
-
-        break;
-    case 4: // left
-        if (ind->p.y > 0) {
-
-            next.x = ind->p.x;
-            next.y = ind->p.y - 1;
-
-            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
-                case MOVE: {
-                    ind->p.y--;
-                    break;
-                }
-                case STAY: {
-                    break;
-                }
-                case REPRODUCE: {
-                    // works the same as stay just for now
-                    break;
-                }
-                case DIE: {
-                    break;
-                    // removing in iteration
-                }
-                case KILL_AND_MOVE: {
-                    ind->p.y--;
-                    break;
-                    // removing in iteration
-                }
-                default:
-                    break;
-                
-            }
-
-        }
-
-        break;
-    case 5:
-        if (ind->p.x > 0 && ind->p.y < N - 1) {
-
-            next.x = ind->p.x - 1;
-            next.y = ind->p.y + 1;
-
-            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
-                case MOVE: {
-                    ind->p.x--;
-                    ind->p.y++;
-                    break;
-                }
-                case STAY: {
-                    break;
-                }
-                case REPRODUCE: {
-                    // works the same as stay just for now
-                    break;
-                }
-                case DIE: {
-                    break;
-                    // removing in iteration
-                }
-                case KILL_AND_MOVE: {
-                    ind->p.x--;
-                    ind->p.y++;
-                    break;
-                    // removing in iteration
-                }
-                default:
-                    break;
-                
-            }
-            
-        }
-        break;
-    case 6:
-        if (ind->p.x > 0 && ind->p.y > 0) {
-
-            next.x = ind->p.x - 1;
-            next.y = ind->p.y - 1;
-            
-            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
-                case MOVE: {
-                    ind->p.x--;
-                    ind->p.y--;
-                    break;
-                }
-                case STAY: {
-                    break;
-                }
-                case REPRODUCE: {
-                    // works the same as stay just for now
-                    break;
-                }
-                case DIE: {
-                    break;
-                    // removing in iteration
-                }
-                case KILL_AND_MOVE: {
-                    ind->p.x--;
-                    ind->p.y--;
-                    break;
-                    // removing in iteration
-                }
-                default:
-                    break;
-                
-            }
-        }
-        break;
-    case 7:
-        if (ind->p.x < N - 1 && ind->p.y < N - 1) {
-
-            next.x = ind->p.x + 1;
-            next.y = ind->p.y + 1;
-
-            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
-                case MOVE: {
-                    ind->p.x++;
-                    ind->p.y++;
-                    break;
-                }
-                case STAY: {
-                    break;
-                }
-                case REPRODUCE: {
-                    // works the same as stay just for now
-                    break;
-                }
-                case DIE: {
-                    break;
-                    // removing in iteration
-                }
-                case KILL_AND_MOVE: {
-                    ind->p.x++;
-                    ind->p.y++;
-                    break;
-                    // removing in iteration
-                }
-                default:
-                    break;
-                
-            }
-
-        }
-        break;
-    case 8:
-        if (ind->p.x < N - 1 && ind->p.y > 0) {
-
-            next.x = ind->p.x + 1;
-            next.y = ind->p.y - 1;
-
-            switch (action(ind, next, count, foodCount, species, food, victimIndex)) {
-                case MOVE: {
-                    ind->p.x++;
-                    ind->p.y--;
-                    break;
-                }
-                case STAY: {
-                    break;
-                }
-                case REPRODUCE: {
-                    // works the same as stay just for now
-                    break;
-                }
-                case DIE: {
-                    break;
-                    // removing in iteration
-                }
-                case KILL_AND_MOVE: {
-                    ind->p.x++;
-                    ind->p.y--;
-                    break;
-                    // removing in iteration
-                }
-                default:
-                    break;
-                
-            }
-
-        }
-        break;
-    default:
-        break;
+    if ((next.x < N && next.x >= 0) && (next.y < N && next.y >= 0)) {
+        return next;
     }
+    
+    return ind->p;
 
-    return STAY;
-
+    // if ((next.x < N && next.x >= 0) && (next.y < N && next.y >= 0)){
+    //     switch (action(ind, next, count, foodCount, species, food, victimIndex))
+    //     {
+    //     case MOVE: {
+    //                 ind->p.x += dx[option];
+    //                 ind->p.y += dy[option];
+    //                 return MOVE;
+    //             }
+    //             case STAY: {
+    //                 return STAY;
+    //             }
+    //             case REPRODUCE: {
+    //                 // works the same as stay just for now
+    //                 return REPRODUCE;
+    //             }
+    //             case DIE: {
+    //                 return DIE;
+    //                 // removing in iteration
+    //             }
+    //             case KILL_AND_MOVE: {
+    //                 ind->p.x += dx[option];
+    //                 ind->p.y += dy[option];
+    //                 return KILL_AND_MOVE;
+    //                 // removing in iteration
+    //             }
+    //             default:
+    //                 return STAY;
+    // }
+    // }
+    // return STAY;
+    
 }
 
-void removeIndividual(individual species[MAX], int *count, int i){
+void removeIndividual(individual species[MAX], int *count, int i, intent intents[MAX]){
 
     species[i] = species[*count - 1];
+    intents[i] = intents[*count - 1];
+    intents[i].indIndex = i;
     (*count)--;
 
 }
@@ -545,18 +336,65 @@ int indSearch(individual *ind, int *count, individual species[MAX]){
     return -1;
 }
 
-void bornInd(individual *ind, individual species[MAX], int *count){
-    
-    if (*count >= MAX) return; // avoid overflow
+void bornInd(individual *ind, individual species[MAX], int *count, intent intents[MAX]) {
+
+    if (*count >= MAX) return;
+
+    int dx[] = {-1, 1, 0, 0, -1, -1, 1, 1};
+    int dy[] = {0, 0, 1, -1, 1, -1, 1, -1};
+
+    struct point birthCell;
+    int option = 0;
+    int found = 0;
+
+    while (!found) {
+
+        if (option > 7) return;   // no space around parent
+
+        birthCell.x = ind->p.x + dx[option];
+        birthCell.y = ind->p.y + dy[option];
+
+        if (birthCell.x >= 0 && birthCell.x < N &&
+            birthCell.y >= 0 && birthCell.y < N)
+        {
+            int occupied = 0;
+
+            for (int j = 0; j < *count; j++) {
+                if (species[j].p.x == birthCell.x &&
+                    species[j].p.y == birthCell.y) {
+                    occupied = 1;
+                    break;
+                }
+            }
+            
+            for (int j = 0; j < *count; j++) {
+                if (intents[j].target.x == birthCell.x &&
+                    intents[j].target.y == birthCell.y) {
+                    occupied = 1;
+                    break;
+                }
+            }
+
+
+            if (!occupied) found = 1;
+        }
+
+        option++;
+    }
 
     individual newInd;
-    newInd.p.x = ind->p.x;
-    newInd.p.y = ind->p.y;
+    newInd.p = birthCell;
     newInd.lP.age = 0;
     newInd.lP.energy = 8;
     newInd.sex = rand() % 2;
 
     species[*count] = newInd;
     (*count)++;
+
+    intent newIntent;
+    newIntent.indIndex = (*count) - 1;
+    newIntent.target = birthCell;
+    newIntent.satisfied = 1;
+    intents[(*count) - 1] = newIntent;
 
 }
